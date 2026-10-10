@@ -53,15 +53,17 @@ Skill-level release names, such as "redteam v2.3.2", are prose. Toolbox does not
 To declare no eval, write `eval: {"none": "<reason>"}`. The field must be present.
 
 Untested skills are listed, marked "untested", and sorted after tested ones. A plugin installs all of its
-skills, so **a plugin is untested if any of its skills is**. An untested plugin's marketplace entry is named
-`<plugin>-untested`.
+skills, so **a plugin is untested if any of its skills is**. The marketplace entry keeps its plugin name either way, so installs never break.
+Untested is shown in the entry's description and on the front page.
 
 **The result file schema is `toolbox-result-1`:**
 ```json
 {"schema": "toolbox-result-1", "skill": "redteam", "set": "hold-out", "measured_on": "<40-hex>",
+ "run_at": "2026-10-09T14:00:00Z",
  "metrics": {"recall": 53}, "bar": {"recall": {">=": 53}}, "passed": true}
 ```
-`build.py` recomputes `passed` from `metrics` and `bar`, and a mismatch fails (item 7).
+`build.py` recomputes `passed` from `metrics` and `bar`, and a mismatch fails (item 7). `run_at` is the run's
+start in UTC, as reported by the runner. It is self-reported, and the front page says so.
 
 ## runs_on
 
@@ -129,8 +131,9 @@ Only `refresh.py` reads the network. Every item below reads `catalog.json` and `
    The fixture includes a repo with two licenses.
 7. An eval result is unreachable at refresh, is not valid `toolbox-result-1`, has a `passed` that does not
    follow from `metrics` and `bar`, or names a `measured_on` that is not the cataloged pin or an ancestor of
-   it. It also fails when the `bar_locked` commit is not an ancestor of, and older than, the result's commit.
-   That check is what proves the bar was locked before the run. When `measured_on` is an older pin, the front
+   it. It also fails unless the `bar_locked` commit is an ancestor of the result's commit, and the dates run
+   `bar_locked` commit < `run_at` <= result commit. This is what shows the bar was locked before the run.
+   One fixture must fail: a bar locked after `run_at`. When `measured_on` is an older pin, the front
    page shows STALE and the exit is 0.
 8. A skill folder exists in a cataloged repo with no catalog row. It shows as NEW, with exit 0, and fails
    after 14 days. The clock starts at the commit that added its `SKILL.md`.
@@ -152,7 +155,8 @@ Only `refresh.py` reads the network. Every item below reads `catalog.json` and `
       merged until a maintainer runs the private layer on it. The private layer also runs on every push to
       `main` and nightly.
 16. The nightly install fails. It installs each marketplace entry into an empty directory and confirms each
-    skill's `SKILL.md` is present at its pin.
+    skill's `SKILL.md` is present at its pin. A failed install exits 1; an unreachable or rate-limited source
+    exits 2.
 
 `check.py` exits 2, naming the repo, when GitHub cannot be reached or rate-limits it. A check that could not
 run never passes.
