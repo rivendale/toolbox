@@ -162,7 +162,9 @@ a fixture that must pass: a folder that is not a skill, and a word that only loo
 
 **Pin format (verified 2026-10-10).** Anthropic's official marketplace pins plugins by commit:
 `{"source": "url", "url": "<repo>.git", "sha": "<40-hex>"}`, or `"source": "git-subdir"` with `path`, `ref`
-and `sha`. Toolbox uses the same fields. **Spike before the build:** install one plugin from a toolbox
+and `sha`. The documentation says that when both `ref` and `sha` are set, Claude Code checks out `sha`
+(https://code.claude.com/docs/en/plugins/marketplace-reference.md#plugin-sources). It also confirms that a
+plugin always installs all of its skills. Toolbox uses the same fields. **Spike before the build:** install one plugin from a toolbox
 marketplace entry pinned by `sha` and confirm the checked-out commit. If that fails, the pin design is
 revised before any code.
 
