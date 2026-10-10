@@ -1,6 +1,6 @@
 # toolbox: specification
 
-Status: DRAFT, revision 2. It answers the 18 findings of the first second read. Build starts after the
+Status: DRAFT, revision 3. It answers the 18 findings of the first read and the 8 of the second. Build starts after the
 reviewer signs off on this revision.
 
 ## What it is
@@ -18,19 +18,20 @@ here would make two versions, and one of them would go stale.
 |---|---|
 | `README.md` | The front door: tables of skills, workflows and repos. Generated; never edited by hand. |
 | `catalog.json` | Hand-written: which plugins, skills, workflows and repos exist, and their pins. |
-| `snapshot.json` | Machine-written: facts read from the live repos at one moment. Refreshed by a bot PR, never by hand. |
+| `snapshot.json` | Machine-written by `refresh.py`, at one moment: every fact the checks need, including each link's HTTP status. Refreshed by a bot PR, never by hand. |
 | `workflows/` | Methods we repeat, one file each. The only original content here. |
 | `.claude-plugin/marketplace.json` | Generated from `catalog.json`. Points at each plugin's home repo at its pinned SHA. |
 | `tools/build.py` | `build(catalog, snapshot)`, a pure function. It writes the README and the marketplace, and reads nothing live. |
 | `tools/refresh.py` | Reads the live repos and writes `snapshot.json`. |
-| `tools/check.py` | Exits 0 when everything agrees, 1 when something disagrees, and 2 when it could not check. It names the row. |
+| `tools/check.py` | Exits 0 when everything agrees, 1 when something disagrees, and 2 when it could not check. It names the row. When one run has both, 1 wins, and the exit-2 repos are printed too. It takes `--today` so date rules can be tested. |
 
 ## Units: plugin and skill
 
 The marketplace installs a **plugin**, so a plugin is the unit of pin, version and install. For example,
 `rivendale/ai-redteam` is one plugin holding three skills. A **skill** is the unit of description and eval.
 
-- A **plugin** row has `repo`, `pin` (a full 40-hex SHA), `tag` (optional), `version` and `skills`.
+- A **plugin** row has `repo`, `subdir` (optional), `pin` (a full 40-hex SHA), `tag` (optional), `version`,
+  `licenses` and `skills`. `licenses` lists each SPDX identifier and the path it covers.
   The version is read from the repo's `.claude-plugin/plugin.json`, into the snapshot.
 - A **skill** row has `name`, `path`, `what`, `eval` and `runs_on`.
 - A **skill folder** is a folder holding a `SKILL.md` whose frontmatter has `name` and `description`.
@@ -51,8 +52,16 @@ Skill-level release names, such as "redteam v2.3.2", are prose. Toolbox does not
 
 To declare no eval, write `eval: {"none": "<reason>"}`. The field must be present.
 
-Untested skills are listed, marked "untested", and sorted after tested ones. They are kept out of the
-default marketplace install and offered only under a `<plugin>-untested` entry.
+Untested skills are listed, marked "untested", and sorted after tested ones. A plugin installs all of its
+skills, so **a plugin is untested if any of its skills is**. An untested plugin's marketplace entry is named
+`<plugin>-untested`.
+
+**The result file schema is `toolbox-result-1`:**
+```json
+{"schema": "toolbox-result-1", "skill": "redteam", "set": "hold-out", "measured_on": "<40-hex>",
+ "metrics": {"recall": 53}, "bar": {"recall": {">=": 53}}, "passed": true}
+```
+`build.py` recomputes `passed` from `metrics` and `bar`, and a mismatch fails (item 7).
 
 ## runs_on
 
@@ -60,6 +69,8 @@ Each entry names a runner (Claude Code, Codex, Gemini CLI, chat) and has a `trie
 a receipt, a transcript excerpt or an eval result. An entry without one fails.
 
 ## Workflows
+
+Workflow 3 is a habit, not a gate: no check reads messages between agents.
 
 Each file in `workflows/` has five headings, in this order:
 1. When to use it.
@@ -100,6 +111,11 @@ to a skill row.
 
 ## What the check must catch (written before the build)
 
+**Two kinds of fact.** A fact addressed by a pinned SHA cannot change, so a disagreement is an error. A fact
+about a branch head drifts with every commit, so a disagreement only means the snapshot needs a refresh.
+Only `refresh.py` reads the network. Every item below reads `catalog.json` and `snapshot.json`, except item
+11 and item 16.
+
 `check.py` exits 1 and names the row for each of these:
 
 1. A plugin `repo`, a skill `path`, or a `SKILL.md` does not exist at the pinned SHA.
@@ -107,16 +123,21 @@ to a skill row.
 3. A `pin` is not 40 hex characters, does not resolve, or is not an ancestor of the default branch.
 4. A `tag` no longer points at the `pin` (a moved tag).
 5. A cataloged skill's path differs between the pin and the head of the default branch. This means an
-   unreleased change. It shows as BEHIND on the front page, with exit 0. It fails only after 30 days behind.
-6. A row's license differs from the repo's SPDX identifier. A repo with more than one license lists each,
-   with the path each covers.
-7. An eval `result_url` is unreachable, has no score field, or `measured_on` is not the cataloged pin.
-   When `measured_on` is an older pin, the front page shows STALE and the exit is 0. Score and pin both come
-   from the snapshot, never typed.
-8. A skill folder exists in a cataloged repo with no catalog row.
+   unreleased change. It shows as BEHIND, with exit 0. The clock starts at the first commit after the pin
+   that touches the skill path, and it fails after 30 days.
+6. A plugin's `licenses` differ from the SPDX identifiers of the license files at the pin, path by path.
+   The fixture includes a repo with two licenses.
+7. An eval result is unreachable at refresh, is not valid `toolbox-result-1`, has a `passed` that does not
+   follow from `metrics` and `bar`, or names a `measured_on` that is not the cataloged pin or an ancestor of
+   it. It also fails when the `bar_locked` commit is not an ancestor of, and older than, the result's commit.
+   That check is what proves the bar was locked before the run. When `measured_on` is an older pin, the front
+   page shows STALE and the exit is 0.
+8. A skill folder exists in a cataloged repo with no catalog row. It shows as NEW, with exit 0, and fails
+   after 14 days. The clock starts at the commit that added its `SKILL.md`.
 9. `marketplace.json` differs from `build(catalog, snapshot)`, or an entry has no catalog row.
 10. `README.md` differs from `build(catalog, snapshot)`. This is offline: it compares two committed files.
-11. `snapshot.json` disagrees with live state. This is the only check that reads the network.
+11. `snapshot.json` disagrees with live state. A pin-addressed fact that disagrees fails. A head fact that
+    disagrees prints a refresh notice, and fails only when the snapshot is more than 7 days old.
 12. A `runs_on` entry has no `tried` link, or the link is dead.
 13. A workflow file lacks any of the five headings, or its example link does not resolve to a public repo path.
 14. A repos-table link does not resolve, or points at a private or archived repo. A Protocol-Wealth row also
@@ -126,8 +147,12 @@ to a skill row.
     - **Public patterns** (in the repo): attribution trailers (`Co-Authored-By`, `Claude-Session`),
       absolute home paths, and key-shaped strings.
     - **Private names** (family members, private repos, clients and internal seat names): read from a CI secret,
-      `TOOLBOX_DENYLIST`, which is never written to the repo or the log. Fork PRs have no secrets, so they run
-      the public layer only, and the private layer runs on every push to `main` and nightly.
+      `TOOLBOX_DENYLIST`, which is never written to the repo or the log. A finding prints the file and line,
+      never the matched text. Fork PRs have no secrets, so they run the public layer only. A fork PR is not
+      merged until a maintainer runs the private layer on it. The private layer also runs on every push to
+      `main` and nightly.
+16. The nightly install fails. It installs each marketplace entry into an empty directory and confirms each
+    skill's `SKILL.md` is present at its pin.
 
 `check.py` exits 2, naming the repo, when GitHub cannot be reached or rate-limits it. A check that could not
 run never passes.
@@ -135,8 +160,11 @@ run never passes.
 Each item gets a fixture that must produce its exit code before the check is accepted. Items 8 and 15 also get
 a fixture that must pass: a folder that is not a skill, and a word that only looks like a name.
 
-**The install is exercised nightly.** Install from the marketplace into an empty directory, then confirm each
-skill's `SKILL.md` is present at its pin.
+**Pin format (verified 2026-10-10).** Anthropic's official marketplace pins plugins by commit:
+`{"source": "url", "url": "<repo>.git", "sha": "<40-hex>"}`, or `"source": "git-subdir"` with `path`, `ref`
+and `sha`. Toolbox uses the same fields. **Spike before the build:** install one plugin from a toolbox
+marketplace entry pinned by `sha` and confirm the checked-out commit. If that fails, the pin design is
+revised before any code.
 
 ## Out of scope
 
