@@ -1,6 +1,7 @@
 # toolbox: specification
 
-Status: DRAFT for review. Build starts after a second reader signs off.
+Status: DRAFT, revision 2. It answers the 18 findings of the first second read. Build starts after the
+reviewer signs off on this revision.
 
 ## What it is
 
@@ -15,80 +16,127 @@ here would make two versions, and one of them would go stale.
 
 | Path | What |
 |---|---|
-| `README.md` | The front door: one table of skills, one of workflows, one of repos. Generated. |
-| `catalog.json` | The source the README is built from. Written by hand, checked by machine. |
-| `workflows/` | Methods we repeat, one file each (see below). The only original content here. |
-| `.claude-plugin/marketplace.json` | One marketplace that points at each skill's home repo, at a pinned version. |
-| `tools/build.py` | Builds the README from `catalog.json` and the live repos. |
-| `tools/check.py` | Fails when the catalog and the repos disagree. Runs nightly and on every PR. |
+| `README.md` | The front door: tables of skills, workflows and repos. Generated; never edited by hand. |
+| `catalog.json` | Hand-written: which plugins, skills, workflows and repos exist, and their pins. |
+| `snapshot.json` | Machine-written: facts read from the live repos at one moment. Refreshed by a bot PR, never by hand. |
+| `workflows/` | Methods we repeat, one file each. The only original content here. |
+| `.claude-plugin/marketplace.json` | Generated from `catalog.json`. Points at each plugin's home repo at its pinned SHA. |
+| `tools/build.py` | `build(catalog, snapshot)`, a pure function. It writes the README and the marketplace, and reads nothing live. |
+| `tools/refresh.py` | Reads the live repos and writes `snapshot.json`. |
+| `tools/check.py` | Exits 0 when everything agrees, 1 when something disagrees, and 2 when it could not check. It names the row. |
 
-## The catalog: one row per skill
+## Units: plugin and skill
+
+The marketplace installs a **plugin**, so a plugin is the unit of pin, version and install. For example,
+`rivendale/ai-redteam` is one plugin holding three skills. A **skill** is the unit of description and eval.
+
+- A **plugin** row has `repo`, `pin` (a full 40-hex SHA), `tag` (optional), `version` and `skills`.
+  The version is read from the repo's `.claude-plugin/plugin.json`, into the snapshot.
+- A **skill** row has `name`, `path`, `what`, `eval` and `runs_on`.
+- A **skill folder** is a folder holding a `SKILL.md` whose frontmatter has `name` and `description`.
+  Nothing else counts.
+
+Skill-level release names, such as "redteam v2.3.2", are prose. Toolbox does not read them. The eval's
+`measured_on` field is what ties a score to code.
+
+## Eval fields (per skill)
 
 | Field | Rule |
 |---|---|
-| `name`, `repo`, `path` | Where the skill lives, such as `rivendale/ai-redteam`, `skills/redteam`. |
-| `version` | The version the skill declares, read from the repo, never typed here. |
-| `pin` | The commit the marketplace installs. |
-| `license` | Read from the repo's LICENSE file. |
-| `what` | One sentence: what a user gets. |
-| `eval` | A link to the latest published result, its date, and the score. Use `none` if there is no eval. A skill with no eval says so on the front page. |
-| `runs_on` | Claude Code, Codex, Gemini CLI, chat: only where it has been tried. |
+| `result_url` | A machine-readable result file (JSON) in the skill's repo, at a commit SHA. |
+| `set` | `dev` or `hold-out`. The front page shows the hold-out result. A dev-only result shows as "dev only". |
+| `measured_on` | The plugin SHA the result was measured on. |
+| `bar_locked` | A link to the commit that locked the pass bar before the run. |
+| score | Never stored in the catalog. `build.py` reads it from the result file, as captured in `snapshot.json`. |
 
-Skills at the start:
-- **rivendale/ai-redteam:** redteam, pr-review, assess.
-- **rivendale/hsi-operator:** hsi-operator, context-steward, repo-triage, system-map, update.
-- **rivendale/opensource:** the five studio skills (game-art, game-sfx, game-music, game-video, game-prototype) as they ship, each with its eval cases under `evals/studio/`.
+To declare no eval, write `eval: {"none": "<reason>"}`. The field must be present.
 
-## Workflows: methods written down once
+Untested skills are listed, marked "untested", and sorted after tested ones. They are kept out of the
+default marketplace install and offered only under a `<plugin>-untested` entry.
 
-Each workflow file follows the same shape:
-- when to use it;
-- the steps;
-- what a done state looks like;
-- the check that proves it;
-- an example from a public repo.
+## runs_on
+
+Each entry names a runner (Claude Code, Codex, Gemini CLI, chat) and has a `tried` link to a run record:
+a receipt, a transcript excerpt or an eval result. An entry without one fails.
+
+## Workflows
+
+Each file in `workflows/` has five headings, in this order:
+1. When to use it.
+2. Steps.
+3. Done looks like.
+4. The check that proves it.
+5. Example, with a link into a public repo.
 
 Workflows at the start:
 1. **Build a tested skill.**
    - Write the spec and every way the skill could fail, first.
    - A different agent writes the cases.
-   - Each clean case gets a blind solve in a neutrally named empty folder.
+   - Each clean case gets a blind solve in a neutrally named empty folder. Reset the folder before a retry,
+     because an agent that died mid-run leaves files behind.
    - Lock the pass bar before any scored run.
    - The final run uses unseen hold-out cases, and its result is published whatever it shows.
 2. **Second reader.**
    - No author reviews their own change.
-   - A review is findings, each with evidence; the owner decides.
-   - The merge waits for the review and for green checks.
-3. **Findings, not directives.** Messages between agents carry what was measured, tagged with how it is known, and a date.
-4. **Gates, not promises.** A rule that matters ships with a check, and the check is proved on an input it must refuse.
+   - A review is findings with evidence; the owner decides.
+   - The merge waits for the review and green checks.
+3. **Findings, not directives.** Messages between agents carry what was measured, how it is known, and a date.
+4. **Gates, not promises.** A rule that matters ships with a check, proved on an input it must refuse.
 5. **Hand off with a receipt.** Work handed to another agent gets an acknowledgement, or an alert after a set time.
 
-## Repos
+## Repos table
 
-A table of every public repo, one line each, grouped by what it is for:
+There is one row per public repo, grouped by purpose:
 - **rivendale:** opensource, ai-redteam, hsi-operator, local-ai, homelab, ci-workflows, and the public games.
-- **Protocol-Wealth (public repos only, as links):** pwos-core, nexus-core, pw-redact-core, pw-router, pw-aave, pwplan-core, pw-learnai-core, pwcli-core, shard-core, pw-ai-agent-code-core.
+- **Protocol-Wealth:** pwos-core, nexus-core, pw-redact-core, pw-router, pw-aave, pwplan-core,
+  pw-learnai-core, pwcli-core, shard-core, pw-ai-agent-code-core.
 
-Protocol Wealth owns its repos. Toolbox only links to them and copies none of their text. A row for a
-Protocol Wealth repo is a name, a link, its license and its own description.
+A Protocol-Wealth row is a link to the repo root, the SPDX license, and the repo's GitHub description shown
+as a quotation and attributed to the repo. Toolbox writes no description of its own for those repos, and
+links nowhere inside their code. Protocol Wealth owns them.
+
+When a repo is archived, renamed or transferred, its row fails until a person updates it. The same applies
+to a skill row.
 
 ## What the check must catch (written before the build)
 
-`tools/check.py` exits non-zero, naming the row, when any of these is true:
+`check.py` exits 1 and names the row for each of these:
 
-1. A catalog row points at a repo, path or file that does not exist.
-2. A row's `version` differs from the version the skill's repo declares. Example found while writing this
-   spec: the ai-redteam marketplace says 2.2.0 while redteam v2.3.2 is live.
-3. A `pin` is not an ancestor of the repo's default branch, or is more than 90 days older than its head.
-4. A row's `license` differs from the repo's LICENSE file.
-5. An `eval` link is dead, or its date is older than the skill's last change. The second case is a stale
-   score, shown on the front page as STALE, not as a failure.
-6. A skill folder exists in a cataloged repo but has no catalog row.
-7. The README differs from what `tools/build.py` would produce.
-8. Any file in this repo names a family member, a private repo, a client or an assistant attribution line.
+1. A plugin `repo`, a skill `path`, or a `SKILL.md` does not exist at the pinned SHA.
+2. A plugin's catalog `version` differs from `plugin.json` at the pin.
+3. A `pin` is not 40 hex characters, does not resolve, or is not an ancestor of the default branch.
+4. A `tag` no longer points at the `pin` (a moved tag).
+5. A cataloged skill's path differs between the pin and the head of the default branch. This means an
+   unreleased change. It shows as BEHIND on the front page, with exit 0. It fails only after 30 days behind.
+6. A row's license differs from the repo's SPDX identifier. A repo with more than one license lists each,
+   with the path each covers.
+7. An eval `result_url` is unreachable, has no score field, or `measured_on` is not the cataloged pin.
+   When `measured_on` is an older pin, the front page shows STALE and the exit is 0. Score and pin both come
+   from the snapshot, never typed.
+8. A skill folder exists in a cataloged repo with no catalog row.
+9. `marketplace.json` differs from `build(catalog, snapshot)`, or an entry has no catalog row.
+10. `README.md` differs from `build(catalog, snapshot)`. This is offline: it compares two committed files.
+11. `snapshot.json` disagrees with live state. This is the only check that reads the network.
+12. A `runs_on` entry has no `tried` link, or the link is dead.
+13. A workflow file lacks any of the five headings, or its example link does not resolve to a public repo path.
+14. A repos-table link does not resolve, or points at a private or archived repo. A Protocol-Wealth row also
+    fails when it links below the repo root, the owner is not Protocol-Wealth, or the repo was renamed,
+    transferred or made private.
+15. Forbidden content. Two layers:
+    - **Public patterns** (in the repo): attribution trailers (`Co-Authored-By`, `Claude-Session`),
+      absolute home paths, and key-shaped strings.
+    - **Private names** (family members, private repos, clients and internal seat names): read from a CI secret,
+      `TOOLBOX_DENYLIST`, which is never written to the repo or the log. Fork PRs have no secrets, so they run
+      the public layer only, and the private layer runs on every push to `main` and nightly.
 
-Each item gets a fixture that must fail before the check is accepted. Item 6 also gets one that must
-pass: a folder that is not a skill.
+`check.py` exits 2, naming the repo, when GitHub cannot be reached or rate-limits it. A check that could not
+run never passes.
+
+Each item gets a fixture that must produce its exit code before the check is accepted. Items 8 and 15 also get
+a fixture that must pass: a folder that is not a skill, and a word that only looks like a name.
+
+**The install is exercised nightly.** Install from the marketplace into an empty directory, then confirm each
+skill's `SKILL.md` is present at its pin.
 
 ## Out of scope
 
@@ -97,9 +145,9 @@ pass: a folder that is not a skill.
 - Any build or review work on Protocol Wealth repos.
 - A website. The README is the front page.
 
-## Open questions for the reviewer
+## Before the build: changes in other repos
 
-1. Should a skill with no eval be listed at all, or listed under "untested"?
-   Proposed: listed, marked untested.
-2. Should the marketplace pin follow each repo's latest release tag, or a commit chosen by hand?
-   Proposed: release tags where a repo has them, otherwise a commit.
+These are owner PRs, listed here so the first catalog can pass:
+- **ai-redteam:** publish a machine-readable eval result per skill. Bump `plugin.json` past 2.2.0 to match
+  what is live, and cut a release tag.
+- **hsi-operator and opensource:** the same, when each skill has an eval.
