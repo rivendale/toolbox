@@ -14,6 +14,7 @@ reviewer signs off. Issue #2 tracks the first milestone.
 | [ai-redteam](https://github.com/rivendale/ai-redteam) | Adversarial review for AI-produced work: red-team decisions, plans and claims, plus bounded PR review. Claude skills and paste-in prompts, with an eval set. |
 | [ci-workflows](https://github.com/rivendale/ci-workflows) | A reusable GitHub Actions workflow: an AI code-review panel for pull requests. |
 | [hsi-operator](https://github.com/rivendale/hsi-operator) | Keep a human at the strategic level of agent work: surface only what needs a person, and establish what 'done' means before building. |
+| [opensource](https://github.com/rivendale/opensource) | Build from open source instead of from scratch: license-checked catalogs of games, engines and other open-source software, with build playbooks and AI tooling guides. |
 
 ## License
 
